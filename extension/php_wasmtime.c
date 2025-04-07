@@ -60,13 +60,18 @@ static zend_object* wasm_engine_create_object(zend_class_entry *class_type) {
 
 PHP_METHOD(WasmEngine, __construct)
 {
+    printf("constructor initiated\n");
     php_wasm_engine_t *engine_obj = Z_WASMENGINE_P(getThis());
+    printf("wasm engine object created\n");
     engine_obj->engine = wasm_engine_new();
+	printf("wasm engine created\n");
     if (!engine_obj->engine) {
         zend_throw_exception(NULL, "Failed to create wasm_engine_t", 0);
         return;
     }
+	printf("wasm engine store created\n");
     engine_obj->store = wasmtime_store_new(engine_obj->engine, NULL, NULL);
+	printf("wasm engine store created\n");
     if (!engine_obj->store) {
         zend_throw_exception(NULL, "Failed to create wasmtime_store_t", 0);
         return;
@@ -611,10 +616,12 @@ static const zend_function_entry wasm_instance_methods[] = {
 };
 
 
+
 /*-------------------------------------------
   MEMORY (WasmMemory)
 --------------------------------------------*/
-static zend_object *wasm_memory_create_object(zend_class_entry *class_type) {
+static zend_object *wasm_memory_create_object(zend_class_entry *class_type)
+{
     php_wasm_memory_t *intern = ecalloc(1, sizeof(php_wasm_memory_t) + zend_object_properties_size(class_type));
     zend_object_std_init(&intern->std, class_type);
     object_properties_init(&intern->std, class_type);
@@ -622,10 +629,46 @@ static zend_object *wasm_memory_create_object(zend_class_entry *class_type) {
     return &intern->std;
 }
 
-static void wasm_memory_free_obj(zend_object *object) {
+static void wasm_memory_free_obj(zend_object *object)
+{
     php_wasm_memory_t *intern = (php_wasm_memory_t *)((char*)(object) - XtOffsetOf(php_wasm_memory_t, std));
     zend_object_std_dtor(&intern->std);
 }
+
+/* Arginfo: for all Memory methods */
+/* We can provide a return type or leave as any. If we know the type, let's specify. */
+
+/* __construct(engine, initialPages, maxPages=?) */
+ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmmemory_construct, 0, 0, 2)
+    ZEND_ARG_OBJ_INFO(0, engine, WasmEngine, 0)
+    ZEND_ARG_INFO(0, initialPages)
+    ZEND_ARG_INFO(0, maxPages)
+ZEND_END_ARG_INFO()
+
+/* dataSize(): int */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_datasize, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+/* read(offset, length): string */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_read, 0, 2, IS_STRING, 0)
+    ZEND_ARG_INFO(0, offset)
+    ZEND_ARG_INFO(0, length)
+ZEND_END_ARG_INFO()
+
+/* write(offset, data): void */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_write, 0, 2, IS_VOID, 0)
+    ZEND_ARG_INFO(0, offset)
+    ZEND_ARG_INFO(0, data)
+ZEND_END_ARG_INFO()
+
+/* size(): int */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_size, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+/* grow(additionalPages): int|false (on failure) */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_wasmmemory_grow, 0, 1, MAY_BE_LONG|MAY_BE_FALSE)
+    ZEND_ARG_INFO(0, additional)
+ZEND_END_ARG_INFO()
 
 PHP_METHOD(WasmMemory, __construct)
 {
@@ -749,29 +792,14 @@ PHP_METHOD(WasmMemory, grow)
     RETURN_LONG(previous_size);
 }
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmmemory_construct, 0, 0, 2)
-    ZEND_ARG_OBJ_INFO(0, engine, WasmEngine, 0)
-    ZEND_ARG_INFO(0, initialPages)
-    ZEND_ARG_INFO(0, maxPages)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmmemory_read, 0, 0, 2)
-    ZEND_ARG_INFO(0, offset)
-    ZEND_ARG_INFO(0, length)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmmemory_write, 0, 0, 2)
-    ZEND_ARG_INFO(0, offset)
-    ZEND_ARG_INFO(0, data)
-ZEND_END_ARG_INFO()
 
 static const zend_function_entry wasm_memory_methods[] = {
     PHP_ME(WasmMemory, __construct, arginfo_wasmmemory_construct, ZEND_ACC_PUBLIC|ZEND_ACC_CTOR)
-    PHP_ME(WasmMemory, dataSize,    NULL,                          ZEND_ACC_PUBLIC)
+    PHP_ME(WasmMemory, dataSize,    arginfo_wasmmemory_datasize,   ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, read,        arginfo_wasmmemory_read,       ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, write,       arginfo_wasmmemory_write,      ZEND_ACC_PUBLIC)
-    PHP_ME(WasmMemory, size,        NULL,                          ZEND_ACC_PUBLIC)
-    PHP_ME(WasmMemory, grow,        NULL,                          ZEND_ACC_PUBLIC)
+    PHP_ME(WasmMemory, size,        arginfo_wasmmemory_size,       ZEND_ACC_PUBLIC)
+    PHP_ME(WasmMemory, grow,        arginfo_wasmmemory_grow,       ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 
@@ -875,19 +903,26 @@ PHP_METHOD(WasmGlobal, set)
     }
 }
 
+/* Arginfo for WasmGlobal methods */
+/* __construct(engine, initial_value, mutable=false) */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmglobal_construct, 0, 0, 2)
     ZEND_ARG_OBJ_INFO(0, engine, WasmEngine, 0)
     ZEND_ARG_INFO(0, initialValue)
     ZEND_ARG_INFO(0, mutable)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmglobal_set, 0, 0, 1)
+/* get(): mixed */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmglobal_get, 0, 0, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* set(value: int) : void */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmglobal_set, 0, 1, IS_VOID, 0)
     ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
 
 static const zend_function_entry wasm_global_methods[] = {
     PHP_ME(WasmGlobal, __construct, arginfo_wasmglobal_construct, ZEND_ACC_PUBLIC|ZEND_ACC_CTOR)
-    PHP_ME(WasmGlobal, get,         NULL,                         ZEND_ACC_PUBLIC)
+    PHP_ME(WasmGlobal, get,         arginfo_wasmglobal_get,       ZEND_ACC_PUBLIC)
     PHP_ME(WasmGlobal, set,         arginfo_wasmglobal_set,       ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
