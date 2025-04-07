@@ -1,0 +1,7 @@
+third_party
+.idea
+cmake-build-debug
+cmake-build-release
+build
+.vscode
+.DS_Store
