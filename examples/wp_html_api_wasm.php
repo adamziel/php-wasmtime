@@ -91,6 +91,7 @@ class WPHtmlTagProcessor {
     private $wasm;
     private $memory;
     private $processor_pointer;
+    private $ret_ptr_loc;
     
     /**
      * Constructor
@@ -103,13 +104,20 @@ class WPHtmlTagProcessor {
         $this->memory = $wasm->getMemory('memory');
         
         // Allocate memory for the HTML string
-        $string_pointer = $this->allocateString($html);
-        
+        $string_pointer = $this->wasm->call("__wbindgen_malloc", [
+            strlen($html),
+            4 /* Use alignment 4 */
+        ]);
+        $this->memory->write($string_pointer, $html);
+
         // Create a new tag processor
         $this->processor_pointer = $wasm->call("wp_html_tag_processor_new", [
             $string_pointer,
             strlen($html),
         ]);
+        
+        // Allocate memory for the return pointer (address + length) once and reuse it
+        $this->ret_ptr_loc = $this->wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
     }
     
     /**
@@ -128,19 +136,8 @@ class WPHtmlTagProcessor {
      * @return string The tag name
      */
     public function getTag(): string {
-        // Allocate memory for the return pointer (address + length)
-        $ret_ptr_loc = $this->wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
-        
-        // Get the tag name
-        $this->wasm->call("wp_html_tag_processor_get_tag", [$ret_ptr_loc, $this->processor_pointer]);
-        
-        // Read the string from memory
-        $tag_name = $this->readStringFromPointer($ret_ptr_loc);
-        
-        // Free the memory allocated for the return pointer
-        $this->wasm->call("__wbindgen_free", [$ret_ptr_loc, 8, 4]);
-        
-        return $tag_name;
+        $this->wasm->call("wp_html_tag_processor_get_tag", [$this->ret_ptr_loc, $this->processor_pointer]);
+        return $this->memory->read_string_from_pointer($this->ret_ptr_loc);
     }
 
     /**
@@ -149,19 +146,8 @@ class WPHtmlTagProcessor {
      * @return string The modifiable text content
      */
     public function getModifiableText(): string {
-        // Allocate memory for the return pointer (address + length)
-        $ret_ptr_loc = $this->wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
-        
-        // Get the modifiable text
-        $this->wasm->call("wp_html_tag_processor_get_modifiable_text", [$ret_ptr_loc, $this->processor_pointer]);
-        
-        // Read the string from memory
-        $text = $this->readStringFromPointer($ret_ptr_loc);
-        
-        // Free the memory allocated for the return pointer
-        $this->wasm->call("__wbindgen_free", [$ret_ptr_loc, 8, 4]);
-        
-        return $text;
+        $this->wasm->call("wp_html_tag_processor_get_modifiable_text", [$this->ret_ptr_loc, $this->processor_pointer]);
+        return $this->memory->read_string_from_pointer($this->ret_ptr_loc);
     }
     
     /**
@@ -180,55 +166,12 @@ class WPHtmlTagProcessor {
      * @return int The token type
      */
     public function getTokenType(): string {
-        // Allocate memory for the return pointer (address + length)
-        $ret_ptr_loc = $this->wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
-        
-        // Get the token type
-        $this->wasm->call("wp_html_tag_processor_get_token_type", [$ret_ptr_loc, $this->processor_pointer]);
-        
-        // Read the value from memory
-        $token_type = $this->readStringFromPointer($ret_ptr_loc);
-        
-        // Free the memory allocated for the return pointer
-        $this->wasm->call("__wbindgen_free", [$ret_ptr_loc, 8, 4]);
-        
-        return $token_type;
+        $this->wasm->call("wp_html_tag_processor_get_token_type", [$this->ret_ptr_loc, $this->processor_pointer]);
+        return $this->memory->read_string_from_pointer($this->ret_ptr_loc);
     }
 
-    /**
-     * Allocate memory for a string and write it to memory
-     * 
-     * @param string $str The string to allocate
-     * @return int Pointer to the allocated string
-     */
-    private function allocateString(string $str): int {
-        $string_pointer = $this->wasm->call("__wbindgen_malloc", [
-            strlen($str),
-            4 /* Use alignment 4 */
-        ]);
-        $this->memory->write($string_pointer, $str);
-        return $string_pointer;
-    }
-    
-    /**
-     * Read a string from memory using a pointer to a pointer+length pair
-     * 
-     * @param int $ptr_loc Pointer to the pointer+length pair
-     * @return string The string read from memory
-     */
-    private function readStringFromPointer(int $ptr_loc): string {
-        // Read the actual string pointer from the return location
-        $string_ptr_bytes = $this->memory->read($ptr_loc, 4);
-        $actual_string_ptr = unpack("I", $string_ptr_bytes)[1];
-        
-        // Read the string length from the return location (immediately after the pointer)
-        $string_len_bytes = $this->memory->read($ptr_loc + 4, 4);
-        $string_len = unpack("I", $string_len_bytes)[1];
-        
-        // Read the string from Wasm memory using the pointer and length
-        return $this->memory->read($actual_string_ptr, $string_len);
-    }
 }
+
 require_once __DIR__ . "/utils.php";
 
 $html = file_get_contents(__DIR__ . "/html_spec.html");
@@ -245,6 +188,7 @@ benchmark("Counting tokens", function () use ($html, $wasm) {
 benchmark("Getting token details", function () use ($html, $wasm) {
 	$processor = new WPHtmlTagProcessor($wasm, $html);
 	while ($processor->nextToken()) {
+		// $is_closer = $processor->isTagCloser() ? "closing" : "opening";
 		switch ($processor->getTokenType()) {
 			case '#tag':
 				$tag_name = $processor->getTag();

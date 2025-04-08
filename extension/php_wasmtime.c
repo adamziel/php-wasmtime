@@ -969,6 +969,11 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_read, 0, 2, IS_STRING
     ZEND_ARG_INFO(0, length)
 ZEND_END_ARG_INFO()
 
+/* read_string_from_pointer(pointer): string */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_read_string_from_pointer, 0, 1, IS_STRING, 0)
+    ZEND_ARG_INFO(0, pointer)
+ZEND_END_ARG_INFO()
+
 /* write(offset, data): void */
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_write, 0, 2, IS_VOID, 0)
     ZEND_ARG_INFO(0, offset)
@@ -1044,8 +1049,6 @@ PHP_METHOD(WasmMemory, dataSize)
     RETURN_LONG(sz);
 }
 
-
-
 PHP_METHOD(WasmMemory, read)
 {
     zend_long offset, length;
@@ -1089,6 +1092,61 @@ PHP_METHOD(WasmMemory, read)
     PHP_WASMTIME_DEBUG_LOG("Read complete, returning string of length %lld\n", (long long)length);
     RETURN_STRINGL(copy, length);
 }
+
+PHP_METHOD(WasmMemory, read_string_from_pointer)
+{
+    zend_long pointer;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_LONG(pointer)
+    ZEND_PARSE_PARAMETERS_END();
+
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::read_string_from_pointer - pointer: %lld\n", (long long)pointer);
+
+    php_wasm_memory_t *mem_obj = (php_wasm_memory_t *) Z_OBJ_P(getThis());
+    
+    if (!mem_obj->engine_obj) {
+        PHP_WASMTIME_DEBUG_LOG("ERROR: engine_obj is NULL\n");
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
+    
+    // First read the pointer value (4 bytes for address)
+    uint8_t *data = wasmtime_memory_data(context, &mem_obj->memory);
+    size_t mem_size = wasmtime_memory_data_size(context, &mem_obj->memory);
+    
+    // Check if we can read the pointer data (8 bytes total - 4 for address, 4 for length)
+    if (pointer < 0 || (size_t)pointer + 8 > mem_size) {
+        zend_throw_exception(NULL, "Memory pointer read out of bounds", 0);
+        return;
+    }
+    
+    // Read the address (first 4 bytes)
+    uint32_t address;
+    memcpy(&address, data + pointer, 4);
+    
+    // Read the length (next 4 bytes)
+    uint32_t length;
+    memcpy(&length, data + pointer + 4, 4);
+    
+    PHP_WASMTIME_DEBUG_LOG("Extracted address: %u, length: %u\n", address, length);
+    
+    // Now read the actual string data using the address and length
+    if (address < 0 || (size_t)address + length > mem_size) {
+        zend_throw_exception(NULL, "Memory string data read out of bounds", 0);
+        return;
+    }
+    
+    // Allocate memory for the string and copy it
+    char *copy = emalloc(length + 1);
+    memcpy(copy, data + address, length);
+    copy[length] = '\0';
+    
+    PHP_WASMTIME_DEBUG_LOG("String read complete, returning string of length %u\n", length);
+    RETURN_STRINGL(copy, length);
+}
+
 
 PHP_METHOD(WasmMemory, write)
 {
@@ -1249,6 +1307,7 @@ static const zend_function_entry wasm_memory_methods[] = {
     PHP_ME(WasmMemory, __construct, arginfo_wasmmemory_construct, ZEND_ACC_PUBLIC|ZEND_ACC_CTOR)
     PHP_ME(WasmMemory, dataSize,    arginfo_wasmmemory_datasize,   ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, read,        arginfo_wasmmemory_read,       ZEND_ACC_PUBLIC)
+	PHP_ME(WasmMemory, read_string_from_pointer, arginfo_wasmmemory_read_string_from_pointer, ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, write,       arginfo_wasmmemory_write,      ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, size,        arginfo_wasmmemory_size,       ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, grow,        arginfo_wasmmemory_grow,       ZEND_ACC_PUBLIC)
