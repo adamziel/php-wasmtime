@@ -142,6 +142,27 @@ class WPHtmlTagProcessor {
         
         return $tag_name;
     }
+
+    /**
+     * Get the modifiable text content
+     * 
+     * @return string The modifiable text content
+     */
+    public function getModifiableText(): string {
+        // Allocate memory for the return pointer (address + length)
+        $ret_ptr_loc = $this->wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
+        
+        // Get the modifiable text
+        $this->wasm->call("wp_html_tag_processor_get_modifiable_text", [$ret_ptr_loc, $this->processor_pointer]);
+        
+        // Read the string from memory
+        $text = $this->readStringFromPointer($ret_ptr_loc);
+        
+        // Free the memory allocated for the return pointer
+        $this->wasm->call("__wbindgen_free", [$ret_ptr_loc, 8, 4]);
+        
+        return $text;
+    }
     
     /**
      * Check if the current tag is a closing tag
@@ -158,10 +179,22 @@ class WPHtmlTagProcessor {
      * 
      * @return int The token type
      */
-    public function getTokenType(): int {
-        return $this->wasm->call("wp_html_tag_processor_get_token_type", [$this->processor_pointer]);
+    public function getTokenType(): string {
+        // Allocate memory for the return pointer (address + length)
+        $ret_ptr_loc = $this->wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
+        
+        // Get the token type
+        $this->wasm->call("wp_html_tag_processor_get_token_type", [$ret_ptr_loc, $this->processor_pointer]);
+        
+        // Read the value from memory
+        $token_type = $this->readStringFromPointer($ret_ptr_loc);
+        
+        // Free the memory allocated for the return pointer
+        $this->wasm->call("__wbindgen_free", [$ret_ptr_loc, 8, 4]);
+        
+        return $token_type;
     }
-    
+
     /**
      * Allocate memory for a string and write it to memory
      * 
@@ -201,7 +234,16 @@ class WPHtmlTagProcessor {
 $html = "<p><div>Hello, world!</div></p>";
 $processor = new WPHtmlTagProcessor($wasm, $html);
 while ($processor->nextToken()) {
-	$tag_name = $processor->getTag();
-	$is_closer = $processor->isTagCloser() ? "closing" : "opening";
-	echo "Found $is_closer tag: $tag_name\n";
+	var_dump($processor->getTokenType());
+	switch ($processor->getTokenType()) {
+		case '#tag':
+			$tag_name = $processor->getTag();
+			$is_closer = $processor->isTagCloser() ? "closing" : "opening";
+			echo "Found $is_closer tag: $tag_name\n";
+			break;
+		case '#text':
+			$text = $processor->getModifiableText();
+			echo "Found text: $text\n";
+			break;
+	}
 }

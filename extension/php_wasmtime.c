@@ -12,6 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Define a debug logging macro
+#ifdef PHP_WASMTIME_DEBUG
+#define PHP_WASMTIME_DEBUG_LOG(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define PHP_WASMTIME_DEBUG_LOG(...) // No-op when not debugging
+#endif
+
 /* Globals for class entries */
 zend_class_entry *wasm_engine_ce;
 zend_class_entry *wasm_module_ce;
@@ -30,6 +37,7 @@ static zend_object_handlers wasm_global_object_handlers;
 static size_t read_wasm_file(const char *filename, uint8_t **buffer) {
     FILE *f = fopen(filename, "rb");
     if(!f) {
+        // Keep error logging even without debug flag for critical errors
         fprintf(stderr, "read_wasm_file: Failed to open file %s\n", filename);
         return 0;
     }
@@ -50,14 +58,15 @@ static size_t read_wasm_file(const char *filename, uint8_t **buffer) {
     size_t read_bytes = fread(*buffer, 1, size, f);
     fclose(f);
     if (read_bytes != (size_t)size) {
+         // Keep warning logging even without debug flag
          fprintf(stderr, "read_wasm_file: WARNING - fread read %zu bytes but expected %ld\n", read_bytes, size);
          // It might be safer to treat this as an error
-         // efree(*buffer); 
+         // efree(*buffer);
          // *buffer = NULL;
          // return 0;
          // However, for now, we continue and return read_bytes, letting wasmtime handle the partial data.
     }
-    fprintf(stderr, "read_wasm_file: Successfully read %zu bytes from %s\n", read_bytes, filename);
+    PHP_WASMTIME_DEBUG_LOG("read_wasm_file: Successfully read %zu bytes from %s\n", read_bytes, filename);
     return read_bytes;
 }
 
@@ -65,9 +74,9 @@ static size_t read_wasm_file(const char *filename, uint8_t **buffer) {
   ENGINE (WasmEngine)
 --------------------------------------------*/
 static zend_object* wasm_engine_create_object(zend_class_entry *class_type) {
-	fprintf(stderr, "wasm_engine_create_object\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_engine_create_object\n");
     // Allocate only the size of our struct
-    php_wasm_engine_t *intern = ecalloc(1, sizeof(php_wasm_engine_t)); 
+    php_wasm_engine_t *intern = ecalloc(1, sizeof(php_wasm_engine_t));
     zend_object_std_init(&intern->std, class_type);
     // No properties_init needed if no dynamic/declared properties
     intern->std.handlers = &wasm_engine_object_handlers;
@@ -76,29 +85,29 @@ static zend_object* wasm_engine_create_object(zend_class_entry *class_type) {
 
 PHP_METHOD(WasmEngine, __construct)
 {
-    printf("constructor initiated\n");
+    PHP_WASMTIME_DEBUG_LOG("constructor initiated\n");
     php_wasm_engine_t *engine_obj = (php_wasm_engine_t *) Z_OBJ_P(getThis());
-    printf("wasm engine object created\n");
+    PHP_WASMTIME_DEBUG_LOG("wasm engine object created\n");
     engine_obj->engine = wasm_engine_new();
-	printf("wasm engine created\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm engine created\n");
     if (!engine_obj->engine) {
         zend_throw_exception(NULL, "Failed to create wasm_engine_t", 0);
         return;
     }
-	printf("wasm engine store created\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm engine store created\n");
     engine_obj->store = wasmtime_store_new(engine_obj->engine, NULL, NULL);
-	printf("wasm engine store created\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm engine store created\n");
     if (!engine_obj->store) {
         zend_throw_exception(NULL, "Failed to create wasmtime_store_t", 0);
         return;
     }
-    fprintf(stderr, "WasmEngine::__construct - Engine object: %p, refcount: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmEngine::__construct - Engine object: %p, refcount: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
 }
 
 static void wasm_engine_free_obj(zend_object *object) {
-	printf("wasm_engine_free_obj\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_engine_free_obj\n");
     php_wasm_engine_t *intern = (php_wasm_engine_t *) object;
-    fprintf(stderr, "WasmEngine::free_obj - Engine object: %p, refcount: %d\n", intern, GC_REFCOUNT(&intern->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmEngine::free_obj - Engine object: %p, refcount: %d\n", intern, GC_REFCOUNT(&intern->std));
     if (intern->store) {
         wasmtime_store_delete(intern->store);
         intern->store = NULL;
@@ -124,24 +133,24 @@ static const zend_function_entry wasm_engine_methods[] = {
 --------------------------------------------*/
 
 static zend_object* wasm_module_create_object(zend_class_entry *class_type) {
-    fprintf(stderr, "wasm_module_create_object: sizeof(php_wasm_module_t)=%zu\n", sizeof(php_wasm_module_t));
+    PHP_WASMTIME_DEBUG_LOG("wasm_module_create_object: sizeof(php_wasm_module_t)=%zu\n", sizeof(php_wasm_module_t));
     // Allocate only the size of our struct
     php_wasm_module_t *intern = ecalloc(1, sizeof(php_wasm_module_t));
-    fprintf(stderr, "wasm_module_create_object: Allocated module object 'intern' at address: %p\n", intern);
+    PHP_WASMTIME_DEBUG_LOG("wasm_module_create_object: Allocated module object 'intern' at address: %p\n", intern);
     zend_object_std_init(&intern->std, class_type);
     // No properties_init needed if no dynamic/declared properties
     intern->std.handlers = &wasm_module_object_handlers;
-    fprintf(stderr, "wasm_module_create_object: Returning pointer to 'intern->std' at address: %p\n", &intern->std);
-    return &intern->std; 
+    PHP_WASMTIME_DEBUG_LOG("wasm_module_create_object: Returning pointer to 'intern->std' at address: %p\n", &intern->std);
+    return &intern->std;
 }
 
 static void wasm_module_free_obj(zend_object *object) {
-	printf("wasm_module_free_obj\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_module_free_obj\n");
     php_wasm_module_t *intern = (php_wasm_module_t *) object;
 
     // Decrement the reference count of the associated engine object
     if (intern->engine_obj) {
-        fprintf(stderr, "WasmModule::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
+        PHP_WASMTIME_DEBUG_LOG("WasmModule::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
         OBJ_RELEASE(&intern->engine_obj->std);
         intern->engine_obj = NULL; // Prevent double release
     }
@@ -156,7 +165,7 @@ static void wasm_module_free_obj(zend_object *object) {
     //     intern->module = NULL;
     // }
     zend_object_std_dtor(&intern->std);
-	printf("wasm_module_free_obj done\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_module_free_obj done\n");
 }
 
 PHP_METHOD(WasmModule, __construct)
@@ -172,10 +181,10 @@ PHP_METHOD(WasmModule, __construct)
 
     php_wasm_engine_t *engine_obj = (php_wasm_engine_t *) Z_OBJ_P(engine_zv);
     php_wasm_module_t *module_obj = (php_wasm_module_t *) Z_OBJ_P(getThis());
-    fprintf(stderr, "[Module] Received engine: %p, refcount: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("[Module] Received engine: %p, refcount: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
     module_obj->engine_obj = engine_obj;
     GC_ADDREF(&engine_obj->std); // Increment engine refcount
-    fprintf(stderr, "[Module] Stored engine: %p, refcount now: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("[Module] Stored engine: %p, refcount now: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
 
     uint8_t *wasm_bytes = NULL;
     size_t wasm_size = 0;
@@ -215,7 +224,7 @@ PHP_METHOD(WasmModule, __construct)
     module_obj->module = mod;
     
     // --- Success --- 
-    fprintf(stderr, "[Module] Completed successfully. Final engine refcount: %d\n", GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("[Module] Completed successfully. Final engine refcount: %d\n", GC_REFCOUNT(&engine_obj->std));
 }
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_wasmmodule_construct, 0, 0, 2)
@@ -253,18 +262,18 @@ static zend_object *wasm_instance_create_object(zend_class_entry *class_type) {
 }
 
 static void wasm_instance_free_obj(zend_object *object) {
-	printf("wasm_instance_free_obj\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_instance_free_obj\n");
     php_wasm_instance_t *intern = (php_wasm_instance_t *) object;
     
     // Decrement the reference count of the associated engine object
     if (intern->engine_obj) {
-        fprintf(stderr, "WasmInstance::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
+        PHP_WASMTIME_DEBUG_LOG("WasmInstance::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
         OBJ_RELEASE(&intern->engine_obj->std);
         intern->engine_obj = NULL; 
     }
 
     zend_object_std_dtor(&intern->std);
-    fprintf(stderr, "WasmInstance::free_obj - Completed\n");
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::free_obj - Completed\n");
 }
 
 /* For an imported PHP function, we keep a reference to the zval callable in env */
@@ -282,12 +291,12 @@ static wasm_trap_t* php_host_func_callback(
     wasmtime_val_t *results,
     size_t nresults
 ) {
-    printf("php_host_func_callback called with %zu arguments\n", nargs);
+    PHP_WASMTIME_DEBUG_LOG("php_host_func_callback called with %zu arguments\n", nargs);
     
     // Get function environment and validate
     php_host_func_env *fn_env = (php_host_func_env *)env;
     if (!fn_env) {
-        printf("Invalid function environment\n");
+        PHP_WASMTIME_DEBUG_LOG("Invalid function environment\n");
         if (nresults > 0) {
             results[0].kind = WASMTIME_I32;
             results[0].of.i32 = 0;
@@ -297,7 +306,7 @@ static wasm_trap_t* php_host_func_callback(
     
     // Check if the callable is valid
     if (Z_TYPE(fn_env->callable) == IS_UNDEF || Z_TYPE(fn_env->callable) == IS_NULL) {
-        printf("Callable is undefined or null\n");
+        PHP_WASMTIME_DEBUG_LOG("Callable is undefined or null\n");
         if (nresults > 0) {
             results[0].kind = WASMTIME_I32;
             results[0].of.i32 = 0;
@@ -318,22 +327,22 @@ static wasm_trap_t* php_host_func_callback(
             switch (args[i].kind) {
                 case WASMTIME_I32:
                     ZVAL_LONG(&args_array[i], (zend_long)args[i].of.i32);
-                    printf("  Arg %zu: i32 = %d\n", i, args[i].of.i32);
+                    PHP_WASMTIME_DEBUG_LOG("  Arg %zu: i32 = %d\n", i, args[i].of.i32);
                     break;
                 case WASMTIME_I64:
                     ZVAL_LONG(&args_array[i], (zend_long)args[i].of.i64);
-                    printf("  Arg %zu: i64 = %lld\n", i, (long long)args[i].of.i64);
+                    PHP_WASMTIME_DEBUG_LOG("  Arg %zu: i64 = %lld\n", i, (long long)args[i].of.i64);
                     break;
                 case WASMTIME_F32:
                     ZVAL_DOUBLE(&args_array[i], (double)args[i].of.f32);
-                    printf("  Arg %zu: f32 = %f\n", i, (double)args[i].of.f32);
+                    PHP_WASMTIME_DEBUG_LOG("  Arg %zu: f32 = %f\n", i, (double)args[i].of.f32);
                     break;
                 case WASMTIME_F64:
                     ZVAL_DOUBLE(&args_array[i], (double)args[i].of.f64);
-                    printf("  Arg %zu: f64 = %f\n", i, args[i].of.f64);
+                    PHP_WASMTIME_DEBUG_LOG("  Arg %zu: f64 = %f\n", i, args[i].of.f64);
                     break;
                 default:
-                    printf("  Arg %zu: unknown type\n", i);
+                    PHP_WASMTIME_DEBUG_LOG("  Arg %zu: unknown type\n", i);
             }
         }
     }
@@ -364,10 +373,10 @@ static wasm_trap_t* php_host_func_callback(
     zval_ptr_dtor(&callable_copy);
     
     if (call_result != SUCCESS) {
-        printf("Failed to call PHP function\n");
+        PHP_WASMTIME_DEBUG_LOG("Failed to call PHP function\n");
         ZVAL_NULL(&retval); // Ensure retval is NULL if call failed
     } else {
-        printf("PHP function call succeeded\n");
+        PHP_WASMTIME_DEBUG_LOG("PHP function call succeeded\n");
     }
     
     // Convert return value to WebAssembly result
@@ -445,13 +454,13 @@ static wasm_trap_t* php_host_func_callback(
     // Clean up return value
     zval_ptr_dtor(&retval);
     
-    printf("php_host_func_callback completed successfully\n");
+    PHP_WASMTIME_DEBUG_LOG("php_host_func_callback completed successfully\n");
     return NULL; // No trap
 }
 
 /* Freed when the function is destroyed from the store */
 static void php_host_func_finalizer(void *env) {
-	fprintf(stderr, "php_host_func_finalizer\n");
+	PHP_WASMTIME_DEBUG_LOG("php_host_func_finalizer\n");
     php_host_func_env *fn_env = (php_host_func_env *)env;
     zval_dtor(&fn_env->callable);
     efree(fn_env);
@@ -466,7 +475,7 @@ wasm_trap_t* dummy_hi_callback(
 	wasmtime_val_t *results,
 	size_t nresults
 ) {
-	printf("Hi\n"); 
+	PHP_WASMTIME_DEBUG_LOG("Hi\n");
 	return NULL; // No trap
 }
 
@@ -486,21 +495,21 @@ PHP_METHOD(WasmInstance, __construct)
     php_wasm_module_t  *module_obj  = (php_wasm_module_t *) Z_OBJ_P(module_zv);
     php_wasm_instance_t *inst_obj   = (php_wasm_instance_t *) Z_OBJ_P(getThis());
     
-    fprintf(stderr, "WasmInstance::__construct - Engine zval: %p, Engine C struct: %p\n", Z_OBJ_P(engine_zv), engine_obj);
-    fprintf(stderr, "WasmInstance::__construct - Instance zval: %p, Instance C struct: %p\n", Z_OBJ_P(getThis()), inst_obj);
-    fprintf(stderr, "WasmInstance::__construct - Engine refcount BEFORE storing/addref: %d\n", GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::__construct - Engine zval: %p, Engine C struct: %p\n", Z_OBJ_P(engine_zv), engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::__construct - Instance zval: %p, Instance C struct: %p\n", Z_OBJ_P(getThis()), inst_obj);
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::__construct - Engine refcount BEFORE storing/addref: %d\n", GC_REFCOUNT(&engine_obj->std));
 
     // Store the engine object pointer
     inst_obj->engine_obj = engine_obj;
-    fprintf(stderr, "WasmInstance::__construct - Stored engine pointer %p into instance->engine_obj field\n", engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::__construct - Stored engine pointer %p into instance->engine_obj field\n", engine_obj);
 
     // Increment engine's refcount
-    fprintf(stderr, "WasmInstance::__construct - About to GC_ADDREF on engine_obj->std at address: %p\n", &engine_obj->std);
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::__construct - About to GC_ADDREF on engine_obj->std at address: %p\n", &engine_obj->std);
     GC_ADDREF(&engine_obj->std);
-    fprintf(stderr, "WasmInstance::__construct - Engine refcount AFTER addref: %d\n", GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::__construct - Engine refcount AFTER addref: %d\n", GC_REFCOUNT(&engine_obj->std));
 
     wasmtime_context_t *context = wasmtime_store_context(engine_obj->store);
-	printf("context: %p\n", context);
+	PHP_WASMTIME_DEBUG_LOG("context: %p\n", context);
 
     // Retrieve expected imports from module
     wasm_importtype_vec_t import_types;
@@ -511,7 +520,7 @@ PHP_METHOD(WasmInstance, __construct)
     if (import_count > 0) {
         imports = ecalloc(import_count, sizeof(wasmtime_extern_t));
     }
-	printf("imports: %p\n", imports);
+	PHP_WASMTIME_DEBUG_LOG("imports: %p\n", imports);
 
     // If user provided an imports array, we attempt name-based matching
     // In a real extension, we'd do better checking. For demonstration, we do partial matching by name.
@@ -519,7 +528,7 @@ PHP_METHOD(WasmInstance, __construct)
     if (imports_zv && Z_TYPE_P(imports_zv) == IS_ARRAY) {
         ht = Z_ARRVAL_P(imports_zv);
     }
-	printf("ht: %p\n", ht);
+	PHP_WASMTIME_DEBUG_LOG("ht: %p\n", ht);
     for (size_t i = 0; i < import_count; i++) {
         const wasm_importtype_t *imp_type = import_types.data[i];
         wasm_name_t module_name, name;
@@ -554,7 +563,7 @@ PHP_METHOD(WasmInstance, __construct)
                     // If it's a PHP callable, create a new host function
                     if (zend_is_callable(found, 0, NULL)) {
 
-						printf("found callable: %p, type: %d, name: %s, import: %.*s.%.*s\n", 
+						PHP_WASMTIME_DEBUG_LOG("found callable: %p, type: %d, name: %s, import: %.*s.%.*s\n", 
 						       found, Z_TYPE_P(found), 
 						       Z_TYPE_P(found) == IS_OBJECT ? Z_OBJCE_P(found)->name->val : "closure",
 						       (int)module_name.size, module_name.data,
@@ -579,8 +588,8 @@ PHP_METHOD(WasmInstance, __construct)
                         );
                         
                         this_import.of.func = func;
-						printf("func: %p\n", func);
-                        printf("Assigned PHP callable to import %.*s.%.*s\n", 
+						PHP_WASMTIME_DEBUG_LOG("func: %p\n", func);
+                        PHP_WASMTIME_DEBUG_LOG("Assigned PHP callable to import %.*s.%.*s\n", 
                                (int)module_name.size, module_name.data,
                                (int)name.size, name.data);
                         assigned = 1;
@@ -664,14 +673,14 @@ PHP_METHOD(WasmInstance, __construct)
         wasm_name_delete(&module_name);
         wasm_name_delete(&name);
     }
-	printf("after loop\n");
+	PHP_WASMTIME_DEBUG_LOG("after loop\n");
 
 	// @TODO: this causes a double free error, but
 	//        commenting it out causes a memory leak.
 	//        Let's investigate and debug this.
     // wasm_importtype_vec_delete(&import_types);
 
-	printf("vector deleted\n");
+	PHP_WASMTIME_DEBUG_LOG("vector deleted\n");
 
     wasm_trap_t *trap = NULL;
     wasmtime_instance_t instance;
@@ -683,7 +692,7 @@ PHP_METHOD(WasmInstance, __construct)
         &trap
     );
 
-	printf("instance: %p\n", instance);
+	PHP_WASMTIME_DEBUG_LOG("instance: %p\n", instance);
     if (imports) {
         efree(imports);
     }
@@ -832,7 +841,7 @@ PHP_METHOD(WasmInstance, call)
 
 PHP_METHOD(WasmInstance, getMemory)
 {
-    printf("WasmInstance::getMemory\n");
+    PHP_WASMTIME_DEBUG_LOG("WasmInstance::getMemory\n");
     char *mem_name = "memory";
     size_t mem_name_len = 6;
 
@@ -842,40 +851,40 @@ PHP_METHOD(WasmInstance, getMemory)
     ZEND_PARSE_PARAMETERS_END();
 
     php_wasm_instance_t *intern = (php_wasm_instance_t *) Z_OBJ_P(ZEND_THIS);
-    fprintf(stderr, "getMemory: looking for %s\n", mem_name);
-    fprintf(stderr, "Instance: %p, engine_obj: %p\n", intern, intern->engine_obj);
-    fprintf(stderr, "Engine refcount before getMemory: %d\n", GC_REFCOUNT(&intern->engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("getMemory: looking for %s\n", mem_name);
+    PHP_WASMTIME_DEBUG_LOG("Instance: %p, engine_obj: %p\n", intern, intern->engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("Engine refcount before getMemory: %d\n", GC_REFCOUNT(&intern->engine_obj->std));
     wasmtime_context_t *ctx = wasmtime_store_context(intern->engine_obj->store);
-    fprintf(stderr, "Context: %p\n", ctx);
+    PHP_WASMTIME_DEBUG_LOG("Context: %p\n", ctx);
 
     wasmtime_extern_t item;
     bool found = wasmtime_instance_export_get(ctx, &intern->instance, mem_name, mem_name_len, &item);
     if (!found || item.kind != WASMTIME_EXTERN_MEMORY) {
-        fprintf(stderr, "ERROR: Memory export not found\n");
+        PHP_WASMTIME_DEBUG_LOG("ERROR: Memory export not found\n");
         zend_throw_exception(NULL, "Memory export not found", 0);
         RETURN_THROWS();
     }
 
-    fprintf(stderr, "getMemory: memory export found\n");
+    PHP_WASMTIME_DEBUG_LOG("getMemory: memory export found\n");
     object_init_ex(return_value, wasm_memory_ce);
     php_wasm_memory_t *mem_obj = (php_wasm_memory_t *) Z_OBJ_P(return_value);
     
-    fprintf(stderr, "Creating memory object: %p\n", mem_obj);
-    fprintf(stderr, "inst->engine_obj: %p\n", intern->engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("Creating memory object: %p\n", mem_obj);
+    PHP_WASMTIME_DEBUG_LOG("inst->engine_obj: %p\n", intern->engine_obj);
     
     // Copy the memory structure
     mem_obj->memory = item.of.memory;
-    fprintf(stderr, "mem_obj->memory: %p\n", &mem_obj->memory);
+    PHP_WASMTIME_DEBUG_LOG("mem_obj->memory: %p\n", &mem_obj->memory);
     
     // Store a direct pointer to the engine object
     mem_obj->engine_obj = intern->engine_obj;
     
-    fprintf(stderr, "inst->engine_obj: %p\n", intern->engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("inst->engine_obj: %p\n", intern->engine_obj);
     // Increment the reference count of the engine object
     GC_ADDREF(&intern->engine_obj->std);
-    fprintf(stderr, "Engine refcount after getMemory: %d\n", GC_REFCOUNT(&intern->engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("Engine refcount after getMemory: %d\n", GC_REFCOUNT(&intern->engine_obj->std));
 
-    fprintf(stderr, "returning memory object\n");
+    PHP_WASMTIME_DEBUG_LOG("returning memory object\n");
     Z_TRY_ADDREF_P(return_value);
 }
 
@@ -905,7 +914,7 @@ static zend_object *wasm_memory_create_object(zend_class_entry *class_type)
 {
     // Allocate only the size of our struct
     php_wasm_memory_t *intern = ecalloc(1, sizeof(php_wasm_memory_t));
-    fprintf(stderr, "Creating memory object: %p\n", intern);
+    PHP_WASMTIME_DEBUG_LOG("Creating memory object: %p\n", intern);
     
     zend_object_std_init(&intern->std, class_type);
     // No properties_init needed
@@ -919,13 +928,13 @@ static zend_object *wasm_memory_create_object(zend_class_entry *class_type)
 }
 
 static void wasm_memory_free_obj(zend_object *object) {
-	printf("wasm_memory_free_obj\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_memory_free_obj\n");
     php_wasm_memory_t *intern = (php_wasm_memory_t *) object;
-    fprintf(stderr, "WasmMemory::free_obj - Memory object: %p, refcount: %d\n", intern, GC_REFCOUNT(&intern->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::free_obj - Memory object: %p, refcount: %d\n", intern, GC_REFCOUNT(&intern->std));
     
     // Decrement the reference count of the associated engine object
     if (intern->engine_obj) {
-        fprintf(stderr, "WasmMemory::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
+        PHP_WASMTIME_DEBUG_LOG("WasmMemory::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
         OBJ_RELEASE(&intern->engine_obj->std);
         intern->engine_obj = NULL; // Prevent double release
     }
@@ -937,7 +946,7 @@ static void wasm_memory_free_obj(zend_object *object) {
     // For now, we assume memory is managed externally or via instance exports.
 
     zend_object_std_dtor(&intern->std);
-    fprintf(stderr, "WasmMemory::free_obj - Completed\n");
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::free_obj - Completed\n");
 }
 
 /* Arginfo: for all Memory methods */
@@ -987,7 +996,7 @@ ZEND_END_ARG_INFO()
 
 PHP_METHOD(WasmMemory, __construct)
 {
-    printf("WasmMemory::__construct\n");
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::__construct\n");
     zval *engine_zv;
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_OBJECT(engine_zv)
@@ -995,10 +1004,10 @@ PHP_METHOD(WasmMemory, __construct)
 
     php_wasm_memory_t *intern = (php_wasm_memory_t *) Z_OBJ_P(ZEND_THIS);
     php_wasm_engine_t *engine_intern = (php_wasm_engine_t *) Z_OBJ_P(engine_zv);
-    fprintf(stderr, "WasmMemory::__construct - Engine object: %p, refcount: %d\n", engine_intern, GC_REFCOUNT(&engine_intern->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::__construct - Engine object: %p, refcount: %d\n", engine_intern, GC_REFCOUNT(&engine_intern->std));
 
     wasmtime_context_t *context = wasmtime_store_context(engine_intern->store);
-    fprintf(stderr, "Context: %p\n", context);
+    PHP_WASMTIME_DEBUG_LOG("Context: %p\n", context);
 
     wasm_limits_t limits;
     limits.min = (uint32_t) 1; // Assuming initial_pages is 1
@@ -1018,7 +1027,7 @@ PHP_METHOD(WasmMemory, __construct)
     }
 
     intern->memory = memory;
-    fprintf(stderr, "Memory constructor completed successfully\n");
+    PHP_WASMTIME_DEBUG_LOG("Memory constructor completed successfully\n");
 }
 
 PHP_METHOD(WasmMemory, dataSize)
@@ -1045,24 +1054,24 @@ PHP_METHOD(WasmMemory, read)
         Z_PARAM_LONG(length)
     ZEND_PARSE_PARAMETERS_END();
 
-    fprintf(stderr, "WasmMemory::read - offset: %lld, length: %lld\n", (long long)offset, (long long)length);
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::read - offset: %lld, length: %lld\n", (long long)offset, (long long)length);
 
-    fprintf(stderr, "Getting memory object\n");
+    PHP_WASMTIME_DEBUG_LOG("Getting memory object\n");
     php_wasm_memory_t *mem_obj = (php_wasm_memory_t *) Z_OBJ_P(getThis());
-    fprintf(stderr, "Memory object: %p, engine_obj: %p\n", mem_obj, mem_obj->engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("Memory object: %p, engine_obj: %p\n", mem_obj, mem_obj->engine_obj);
     
     if (!mem_obj->engine_obj) {
-        fprintf(stderr, "ERROR: engine_obj is NULL\n");
+        PHP_WASMTIME_DEBUG_LOG("ERROR: engine_obj is NULL\n");
         zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
         return;
     }
-    fprintf(stderr, "WasmMemory::read - Engine object: %p, refcount: %d\n", mem_obj->engine_obj, GC_REFCOUNT(&mem_obj->engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::read - Engine object: %p, refcount: %d\n", mem_obj->engine_obj, GC_REFCOUNT(&mem_obj->engine_obj->std));
     
     wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
-    fprintf(stderr, "Context: %p\n", context);
+    PHP_WASMTIME_DEBUG_LOG("Context: %p\n", context);
 
     size_t sz = wasmtime_memory_data_size(context, &mem_obj->memory);
-    fprintf(stderr, "Memory size: %zu\n", sz);
+    PHP_WASMTIME_DEBUG_LOG("Memory size: %zu\n", sz);
     
     if (offset < 0 || length < 0 || (size_t)offset + (size_t)length > sz) {
         zend_throw_exception(NULL, "Memory read out of bounds", 0);
@@ -1070,14 +1079,14 @@ PHP_METHOD(WasmMemory, read)
     }
 
     uint8_t *data = wasmtime_memory_data(context, &mem_obj->memory);
-    fprintf(stderr, "Memory data pointer: %p\n", data);
+    PHP_WASMTIME_DEBUG_LOG("Memory data pointer: %p\n", data);
     
     // Allocate new memory for the string to avoid double free issues
     char *copy = emalloc(length + 1);
     memcpy(copy, data + offset, length);
     copy[length] = '\0';
     
-    fprintf(stderr, "Read complete, returning string of length %lld\n", (long long)length);
+    PHP_WASMTIME_DEBUG_LOG("Read complete, returning string of length %lld\n", (long long)length);
     RETURN_STRINGL(copy, length);
 }
 
@@ -1092,33 +1101,33 @@ PHP_METHOD(WasmMemory, write)
         Z_PARAM_STRING(buf, buf_len)
     ZEND_PARSE_PARAMETERS_END();
 
-    fprintf(stderr, "WasmMemory::write - offset: %lld, buf_len: %zu\n", (long long)offset, buf_len);
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::write - offset: %lld, buf_len: %zu\n", (long long)offset, buf_len);
 
     php_wasm_memory_t *mem_obj = (php_wasm_memory_t *) Z_OBJ_P(getThis());
-    fprintf(stderr, "Memory object: %p, engine_obj: %p\n", mem_obj, mem_obj->engine_obj);
+    PHP_WASMTIME_DEBUG_LOG("Memory object: %p, engine_obj: %p\n", mem_obj, mem_obj->engine_obj);
     
     if (!mem_obj->engine_obj) {
-        fprintf(stderr, "ERROR: engine_obj is NULL\n");
+        PHP_WASMTIME_DEBUG_LOG("ERROR: engine_obj is NULL\n");
         zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
         return;
     }
-    fprintf(stderr, "WasmMemory::write - Engine object: %p, refcount: %d\n", mem_obj->engine_obj, GC_REFCOUNT(&mem_obj->engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmMemory::write - Engine object: %p, refcount: %d\n", mem_obj->engine_obj, GC_REFCOUNT(&mem_obj->engine_obj->std));
     
     wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
-    fprintf(stderr, "Context: %p\n", context);
+    PHP_WASMTIME_DEBUG_LOG("Context: %p\n", context);
 
     size_t sz = wasmtime_memory_data_size(context, &mem_obj->memory);
-    fprintf(stderr, "Memory size: %zu\n", sz);
+    PHP_WASMTIME_DEBUG_LOG("Memory size: %zu\n", sz);
     if (offset < 0 || (size_t)offset + buf_len > sz) {
-        fprintf(stderr, "ERROR: Memory write out of bounds\n");
+        PHP_WASMTIME_DEBUG_LOG("ERROR: Memory write out of bounds\n");
         zend_throw_exception(NULL, "Memory write out of bounds", 0);
         return;
     }
 
     uint8_t *data = wasmtime_memory_data(context, &mem_obj->memory);
-    fprintf(stderr, "Memory data pointer: %p\n", data);
+    PHP_WASMTIME_DEBUG_LOG("Memory data pointer: %p\n", data);
     memcpy(data + offset, buf, buf_len);
-    fprintf(stderr, "Write complete\n");
+    PHP_WASMTIME_DEBUG_LOG("Write complete\n");
 }
 
 PHP_METHOD(WasmMemory, size)
@@ -1262,18 +1271,18 @@ static zend_object *wasm_global_create_object(zend_class_entry *class_type) {
 }
 
 static void wasm_global_free_obj(zend_object *object) {
-	printf("wasm_global_free_obj\n");
+	PHP_WASMTIME_DEBUG_LOG("wasm_global_free_obj\n");
     php_wasm_global_t *intern = (php_wasm_global_t *) object;
 
     // Decrement the reference count of the associated engine object
     if (intern->engine_obj) {
-        fprintf(stderr, "WasmGlobal::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
+        PHP_WASMTIME_DEBUG_LOG("WasmGlobal::free_obj - Releasing engine object: %p, refcount before release: %d\n", intern->engine_obj, GC_REFCOUNT(&intern->engine_obj->std));
         OBJ_RELEASE(&intern->engine_obj->std);
         intern->engine_obj = NULL; 
     }
 
     zend_object_std_dtor(&intern->std);
-    fprintf(stderr, "WasmGlobal::free_obj - Completed\n");
+    PHP_WASMTIME_DEBUG_LOG("WasmGlobal::free_obj - Completed\n");
 }
 
 /* A constructor that creates a new global, e.g. i32 or i64. For simplicity only i32. */
@@ -1292,12 +1301,12 @@ PHP_METHOD(WasmGlobal, __construct)
     php_wasm_engine_t *engine_obj = (php_wasm_engine_t *) Z_OBJ_P(engine_zv);
     php_wasm_global_t *global_obj = (php_wasm_global_t *) Z_OBJ_P(getThis());
     
-    fprintf(stderr, "WasmGlobal::__construct - Received engine: %p, refcount: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmGlobal::__construct - Received engine: %p, refcount: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
     
     // Store the engine object and increment its refcount
     global_obj->engine_obj = engine_obj;
     GC_ADDREF(&engine_obj->std);
-    fprintf(stderr, "WasmGlobal::__construct - Stored engine: %p, refcount now: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
+    PHP_WASMTIME_DEBUG_LOG("WasmGlobal::__construct - Stored engine: %p, refcount now: %d\n", engine_obj, GC_REFCOUNT(&engine_obj->std));
 
     wasmtime_context_t *context = wasmtime_store_context(engine_obj->store);
 
