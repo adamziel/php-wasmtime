@@ -212,142 +212,171 @@ static wasm_trap_t* php_host_func_callback(
     wasmtime_val_t *results,
     size_t nresults
 ) {
-	printf("php_host_func_callback\n");
+    printf("php_host_func_callback called with %zu arguments\n", nargs);
+    
+    // Get function environment and validate
     php_host_func_env *fn_env = (php_host_func_env *)env;
-
-    // Prepare call to PHP function
-    // Convert the wasmtime_val_t arguments to zvals.
-    zval php_retval;
-    ZVAL_NULL(&php_retval);
-
-    zval php_args[16]; /* simple limit of 16 for example */
-    if (nargs > 16) {
-        // Return a trap if too many arguments. Could be made more dynamic.
-        // But let's create no actual trap content to keep example short.
-        return wasm_trap_new(wasmtime_caller_context(caller), NULL);
+    if (!fn_env) {
+        printf("Invalid function environment\n");
+        if (nresults > 0) {
+            results[0].kind = WASMTIME_I32;
+            results[0].of.i32 = 0;
+        }
+        return NULL; // No trap
     }
-
-    for (size_t i = 0; i < nargs; i++) {
-        ZVAL_NULL(&php_args[i]);
-		printf("php_args[%zu]: %p\n", i, &php_args[i]);
-        switch (args[i].kind) {
-            case WASMTIME_I32:
-                ZVAL_LONG(&php_args[i], (zend_long)args[i].of.i32);
-                break;
-            case WASMTIME_I64:
-                // If 64-bit is out of range, we'd handle that, ignoring details here.
-                ZVAL_LONG(&php_args[i], (zend_long)args[i].of.i64);
-                break;
-            case WASMTIME_F32:
-                ZVAL_DOUBLE(&php_args[i], (double)args[i].of.f32);
-                break;
-            case WASMTIME_F64:
-                ZVAL_DOUBLE(&php_args[i], (double)args[i].of.f64);
-                break;
-            default:
-                ZVAL_NULL(&php_args[i]);
+    
+    // Check if the callable is valid
+    if (Z_TYPE(fn_env->callable) == IS_UNDEF || Z_TYPE(fn_env->callable) == IS_NULL) {
+        printf("Callable is undefined or null\n");
+        if (nresults > 0) {
+            results[0].kind = WASMTIME_I32;
+            results[0].of.i32 = 0;
+        }
+        return NULL; // No trap
+    }
+    
+    // Prepare call to PHP function
+    zval retval;
+    ZVAL_NULL(&retval);
+    
+    // Allocate arguments array
+    zval *args_array = NULL;
+    if (nargs > 0) {
+        args_array = safe_emalloc(nargs, sizeof(zval), 0);
+        for (size_t i = 0; i < nargs; i++) {
+            ZVAL_NULL(&args_array[i]);
+            switch (args[i].kind) {
+                case WASMTIME_I32:
+                    ZVAL_LONG(&args_array[i], (zend_long)args[i].of.i32);
+                    printf("  Arg %zu: i32 = %d\n", i, args[i].of.i32);
+                    break;
+                case WASMTIME_I64:
+                    ZVAL_LONG(&args_array[i], (zend_long)args[i].of.i64);
+                    printf("  Arg %zu: i64 = %lld\n", i, (long long)args[i].of.i64);
+                    break;
+                case WASMTIME_F32:
+                    ZVAL_DOUBLE(&args_array[i], (double)args[i].of.f32);
+                    printf("  Arg %zu: f32 = %f\n", i, (double)args[i].of.f32);
+                    break;
+                case WASMTIME_F64:
+                    ZVAL_DOUBLE(&args_array[i], (double)args[i].of.f64);
+                    printf("  Arg %zu: f64 = %f\n", i, args[i].of.f64);
+                    break;
+                default:
+                    printf("  Arg %zu: unknown type\n", i);
+            }
         }
     }
-
-    zend_fcall_info fci;
-    zend_fcall_info_cache fcc;
-    memset(&fci, 0, sizeof(fci));
-    memset(&fcc, 0, sizeof(fcc));
-
-    fci.size = sizeof(fci);
-    fci.object = NULL;
-    ZVAL_COPY_VALUE(&fci.function_name, &fn_env->callable);
-    fci.param_count = (uint32_t) nargs;
-    fci.params = php_args;
-    fci.retval = &php_retval;
-
-	printf("logging fci: %p\n", &fci);
-
-    if (zend_fcall_info_init(&fn_env->callable, 0, &fci, &fcc, NULL, NULL) == FAILURE) {
-		printf("zend_fcall_info_init failed\n");
-        // If we can't initialize the call info, we can't invoke the function.
-        return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-    }
-
-	printf("about to call zend_call_function\n");
-    printf("fci details:\n");
-    printf("  size: %zu\n", fci.size);
-    printf("  param_count: %u\n", fci.param_count);
-    printf("  params: %p\n", fci.params);
-    printf("  retval: %p\n", fci.retval);
     
-    printf("fcc details:\n");
-    printf("  function_handler: %p\n", fcc.function_handler);
-    printf("  calling_scope: %p\n", fcc.calling_scope);
-    printf("  called_scope: %p\n", fcc.called_scope);
-    printf("  object: %p\n", fcc.object);
-
-    if (zend_call_function(&fci, &fcc) != SUCCESS) {
-		printf("zend_call_function failed\n");
-        // If the PHP call fails, we could produce a trap.
-        return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-    }
-
-	printf("after conditions\n");
-
-	/* Convert return value to WASM results (assuming at most 1 result) */
-	if (nresults > 0) {
-		const wasm_functype_t *func_ty = wasmtime_func_type(caller, NULL);
-		if (!func_ty) {
-			return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-		}
-
-		const wasm_valtype_vec_t *results_ty = wasm_functype_results(func_ty);
-		if (results_ty->size != nresults) {
-			wasm_functype_delete((wasm_functype_t *)func_ty);
-			return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-		}
-
-		wasm_valkind_t expected_kind = wasm_valtype_kind(results_ty->data[0]);
-
-		switch (expected_kind) {
-			case WASM_I32:
-				if (Z_TYPE(php_retval) != IS_LONG) {
-					wasm_functype_delete((wasm_functype_t *)func_ty);
-					return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-				}
-				results[0].kind = WASMTIME_I32;
-				results[0].of.i32 = (int32_t)Z_LVAL(php_retval);
-				break;
-
-			case WASM_I64:
-				if (Z_TYPE(php_retval) != IS_LONG) {
-					wasm_functype_delete((wasm_functype_t *)func_ty);
-					return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-				}
-				results[0].kind = WASMTIME_I64;
-				results[0].of.i64 = (int64_t)Z_LVAL(php_retval);
-				break;
-
-			case WASM_F32:
-			case WASM_F64:
-				if (Z_TYPE(php_retval) != IS_DOUBLE) {
-					wasm_functype_delete((wasm_functype_t *)func_ty);
-					return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-				}
-				results[0].kind = (expected_kind == WASM_F32) ? WASMTIME_F32 : WASMTIME_F64;
-				results[0].of.f64 = Z_DVAL(php_retval);  // both store in .f64
-				break;
-
-			default:
-				wasm_functype_delete((wasm_functype_t *)func_ty);
-				return wasm_trap_new(wasmtime_caller_context(caller), NULL);
-		}
-
-		wasm_functype_delete((wasm_functype_t *)func_ty);
-	}
-
-    zval_dtor(&php_retval);
+    // Call the PHP function
+    zval callable_copy;
+    ZVAL_COPY(&callable_copy, &fn_env->callable);
+    
+    zval params;
+    array_init_size(&params, nargs);
     for (size_t i = 0; i < nargs; i++) {
-        zval_dtor(&php_args[i]);
+        zval tmp;
+        ZVAL_COPY(&tmp, &args_array[i]);
+        zend_hash_next_index_insert(Z_ARRVAL(params), &tmp);
     }
-
-    return NULL; /* no trap */
+    
+    // Use call_user_function which is more stable than zend_fcall_info_*
+    int call_result = call_user_function(NULL, NULL, &callable_copy, &retval, nargs, args_array);
+    
+    // Clean up arguments
+    if (args_array) {
+        for (size_t i = 0; i < nargs; i++) {
+            zval_ptr_dtor(&args_array[i]);
+        }
+        efree(args_array);
+    }
+    zval_ptr_dtor(&params);
+    zval_ptr_dtor(&callable_copy);
+    
+    if (call_result != SUCCESS) {
+        printf("Failed to call PHP function\n");
+        ZVAL_NULL(&retval); // Ensure retval is NULL if call failed
+    } else {
+        printf("PHP function call succeeded\n");
+    }
+    
+    // Convert return value to WebAssembly result
+    if (nresults > 0) {
+        wasmtime_context_t *context = wasmtime_caller_context(caller);
+        const wasm_functype_t *func_ty = wasmtime_func_type(context, &fn_env->callable);
+        
+        if (func_ty) {
+            const wasm_valtype_vec_t *results_ty = wasm_functype_results(func_ty);
+            
+            if (results_ty->size > 0) {
+                wasm_valkind_t expected_kind = wasm_valtype_kind(results_ty->data[0]);
+                
+                switch (expected_kind) {
+                    case WASM_I32:
+                        results[0].kind = WASMTIME_I32;
+                        if (Z_TYPE(retval) == IS_LONG) {
+                            results[0].of.i32 = (int32_t)Z_LVAL(retval);
+                        } else if (Z_TYPE(retval) == IS_DOUBLE) {
+                            results[0].of.i32 = (int32_t)Z_DVAL(retval);
+                        } else if (Z_TYPE(retval) == IS_TRUE) {
+                            results[0].of.i32 = 1;
+                        } else if (Z_TYPE(retval) == IS_FALSE) {
+                            results[0].of.i32 = 0;
+                        } else {
+                            // Default for other types
+                            results[0].of.i32 = 0;
+                        }
+                        break;
+                    
+                    case WASM_I64:
+                        results[0].kind = WASMTIME_I64;
+                        if (Z_TYPE(retval) == IS_LONG) {
+                            results[0].of.i64 = (int64_t)Z_LVAL(retval);
+                        } else if (Z_TYPE(retval) == IS_DOUBLE) {
+                            results[0].of.i64 = (int64_t)Z_DVAL(retval);
+                        } else if (Z_TYPE(retval) == IS_TRUE) {
+                            results[0].of.i64 = 1;
+                        } else if (Z_TYPE(retval) == IS_FALSE) {
+                            results[0].of.i64 = 0;
+                        } else {
+                            // Default for other types
+                            results[0].of.i64 = 0;
+                        }
+                        break;
+                    
+                    case WASM_F32:
+                    case WASM_F64:
+                        results[0].kind = (expected_kind == WASM_F32) ? WASMTIME_F32 : WASMTIME_F64;
+                        if (Z_TYPE(retval) == IS_DOUBLE) {
+                            results[0].of.f64 = Z_DVAL(retval);
+                        } else if (Z_TYPE(retval) == IS_LONG) {
+                            results[0].of.f64 = (double)Z_LVAL(retval);
+                        } else {
+                            // Default for other types
+                            results[0].of.f64 = 0.0;
+                        }
+                        break;
+                    
+                    default:
+                        // Unsupported return type, default to 0
+                        results[0].kind = WASMTIME_I32;
+                        results[0].of.i32 = 0;
+                }
+            }
+            
+            wasm_functype_delete((wasm_functype_t *)func_ty);
+        } else {
+            // Default if we can't determine type
+            results[0].kind = WASMTIME_I32;
+            results[0].of.i32 = 0;
+        }
+    }
+    
+    // Clean up return value
+    zval_ptr_dtor(&retval);
+    
+    printf("php_host_func_callback completed successfully\n");
+    return NULL; // No trap
 }
 
 /* Freed when the function is destroyed from the store */

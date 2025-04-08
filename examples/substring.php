@@ -13,9 +13,12 @@ $instanceA = new WasmInstance($engine, $moduleA, [
 		echo "[abort] msg=$msg file=$file line=$line col=$col\n";
 		throw new Exception("WASM aborted");
 	},
-	'console.log' => function ($data) {
-		echo "[console.log] msg=$msg file=$file line=$line col=$col\n";
-		throw new Exception("WASM aborted");
+	'console.log' => function (int $data_pointer) {
+		echo "Calling a console log! :)\n";
+		global $memory;
+		$data = $memory->read($data_pointer, 10);
+		echo "Data: $data\n";
+		return 0;
 	}
 ]);
 
@@ -28,6 +31,6 @@ $result_pointer = $instanceA->call("hello_number", [15]);
 var_dump($memory->read($result_pointer, 30));
 
 // $result = $instanceA->call("substring", ["Hello, world!", 0, 6]);        
-echo "Result of substring: $result\n";
+echo "Result done\n";
 
 
