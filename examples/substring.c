@@ -1,5 +1,5 @@
 // Build with:
-// emcc -O2 substring.c -o substring.wasm -s WASM=1 -s STANDALONE_WASM=1 -s EXPORTED_FUNCTIONS='["_substring", "_string_length", "_hello_number"]' -s IMPORTED_MEMORY=1 --no-entry --import-memory
+// emcc -O2 substring.c -o substring.wasm  -s STANDALONE_WASM=1 -s EXPORTED_FUNCTIONS='["_substring", "_malloc", "_free"]' --no-entry
 
 #include <emscripten.h>
 #include <string.h>

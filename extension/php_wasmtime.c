@@ -51,6 +51,7 @@ static size_t read_wasm_file(const char *filename, uint8_t **buffer) {
   ENGINE (WasmEngine)
 --------------------------------------------*/
 static zend_object* wasm_engine_create_object(zend_class_entry *class_type) {
+	fprintf(stderr, "wasm_engine_create_object\n");
     php_wasm_engine_t *intern = ecalloc(1, sizeof(php_wasm_engine_t) + zend_object_properties_size(class_type));
     zend_object_std_init(&intern->std, class_type);
     object_properties_init(&intern->std, class_type);
@@ -79,6 +80,7 @@ PHP_METHOD(WasmEngine, __construct)
 }
 
 static void wasm_engine_free_obj(zend_object *object) {
+	printf("wasm_engine_free_obj\n");
     php_wasm_engine_t *intern = (php_wasm_engine_t *)((char*)(object) - XtOffsetOf(php_wasm_engine_t, std));
     if (intern->store) {
         wasmtime_store_delete(intern->store);
@@ -112,12 +114,19 @@ static zend_object *wasm_module_create_object(zend_class_entry *class_type) {
 }
 
 static void wasm_module_free_obj(zend_object *object) {
+	printf("wasm_module_free_obj\n");
     php_wasm_module_t *intern = (php_wasm_module_t *)((char*)(object) - XtOffsetOf(php_wasm_module_t, std));
-    if (intern->module) {
-        wasmtime_module_delete(intern->module);
-        intern->module = NULL;
-    }
+	/**
+	 * @TODO: Sometimes, but not always, wasmtime_module_delete causes a crash:
+	 *         SIGSEGV (Address boundary error)
+	 *         It's likely a double free error. Could wasm_instance_free_obj have freed this earlier?
+	 */
+    // if (intern && intern->module) {
+    //     wasmtime_module_delete(intern->module);
+    //     intern->module = NULL;
+    // }
     zend_object_std_dtor(&intern->std);
+	printf("wasm_module_free_obj done\n");
 }
 
 PHP_METHOD(WasmModule, __construct)
@@ -191,6 +200,7 @@ static zend_object *wasm_instance_create_object(zend_class_entry *class_type) {
 }
 
 static void wasm_instance_free_obj(zend_object *object) {
+	printf("wasm_instance_free_obj\n");
     /* wasmtime_instance_t doesn't require a delete function by itself;
        it's stored inside the store. We'll just free the PHP object. */
     php_wasm_instance_t *intern = (php_wasm_instance_t *)((char*)(object) - XtOffsetOf(php_wasm_instance_t, std));
@@ -381,6 +391,7 @@ static wasm_trap_t* php_host_func_callback(
 
 /* Freed when the function is destroyed from the store */
 static void php_host_func_finalizer(void *env) {
+	fprintf(stderr, "php_host_func_finalizer\n");
     php_host_func_env *fn_env = (php_host_func_env *)env;
     zval_dtor(&fn_env->callable);
     efree(fn_env);
@@ -759,6 +770,7 @@ PHP_METHOD(WasmInstance, getMemory)
     // Store a direct pointer to the engine object
     mem_obj->engine_obj = inst->engine_obj;
     
+	fprintf(stderr, "inst->engine_obj: %p\n", inst->engine_obj);
     // Increment the reference count of the engine object
     GC_ADDREF(&inst->engine_obj->std);
     fprintf(stderr, "Engine refcount after getMemory: %d\n", GC_REFCOUNT(&inst->engine_obj->std));
@@ -806,6 +818,7 @@ static zend_object *wasm_memory_create_object(zend_class_entry *class_type)
 
 static void wasm_memory_free_obj(zend_object *object)
 {
+	printf("wasm_memory_free_obj\n");
     php_wasm_memory_t *intern = (php_wasm_memory_t *)((char*)(object) - XtOffsetOf(php_wasm_memory_t, std));
     fprintf(stderr, "Freeing memory object: %p\n", intern);
     
@@ -1142,6 +1155,7 @@ static zend_object *wasm_global_create_object(zend_class_entry *class_type) {
 }
 
 static void wasm_global_free_obj(zend_object *object) {
+	printf("wasm_global_free_obj\n");
     php_wasm_global_t *intern = (php_wasm_global_t *)((char*)(object) - XtOffsetOf(php_wasm_global_t, std));
     zend_object_std_dtor(&intern->std);
 }
