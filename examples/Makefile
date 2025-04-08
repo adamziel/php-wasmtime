@@ -1,9 +1,9 @@
 # Makefile for building WebAssembly examples using AssemblyScript
 
 # Directory settings
-EXAMPLES_DIR = examples
-BUILD_DIR = examples
-NODE_MODULES = node_modules
+EXAMPLES_DIR = ./
+BUILD_DIR = ./
+NODE_MODULES = ../node_modules
 
 # AssemblyScript compiler
 ASC = $(NODE_MODULES)/.bin/asc

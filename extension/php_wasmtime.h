@@ -53,7 +53,7 @@ static inline php_wasm_instance_t *Z_WASMINSTANCE_P(zval *zv) {
 typedef struct _php_wasm_memory_t {
     zend_object std;
     wasmtime_memory_t memory;
-    php_wasm_engine_t *engine_obj;
+    zval engine_zv;
 } php_wasm_memory_t;
 
 static inline php_wasm_memory_t *Z_WASMMEMORY_P(zval *zv) {
