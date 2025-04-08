@@ -735,6 +735,7 @@ PHP_METHOD(WasmInstance, getMemory)
         RETURN_THROWS();
     }
 
+    fprintf(stderr, "getMemory: looking for %s\n", mem_name);
     php_wasm_instance_t *inst = Z_WASMINSTANCE_P(getThis());
     wasmtime_context_t *ctx = wasmtime_store_context(inst->engine_obj->store);
 
@@ -745,15 +746,24 @@ PHP_METHOD(WasmInstance, getMemory)
         RETURN_THROWS();
     }
 
+    fprintf(stderr, "getMemory: memory export found\n");
     object_init_ex(return_value, wasm_memory_ce);
     php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(return_value);
-	fprintf(stderr, "inst->engine_obj: %p\n", inst->engine_obj);
-	mem_obj->memory = item.of.memory;
-	fprintf(stderr, "mem_obj->memory: %p\n", mem_obj->memory);
-	ZVAL_OBJ_COPY(&mem_obj->engine_zv, &inst->engine_obj->std);
-	fprintf(stderr, "mem_obj->engine_zv: %p\n", mem_obj->engine_zv);
+    
+    fprintf(stderr, "inst->engine_obj: %p\n", inst->engine_obj);
+    
+    // Copy the memory structure
+    mem_obj->memory = item.of.memory;
+    fprintf(stderr, "mem_obj->memory: %p\n", &mem_obj->memory);
+    
+    // Store a direct pointer to the engine object
+    mem_obj->engine_obj = inst->engine_obj;
+    
+    // Increment the reference count of the engine object
+    GC_ADDREF(&inst->engine_obj->std);
+    fprintf(stderr, "Engine refcount after getMemory: %d\n", GC_REFCOUNT(&inst->engine_obj->std));
 
-	fprintf(stderr, "returning memory object\n");
+    fprintf(stderr, "returning memory object\n");
 }
 
 
@@ -781,8 +791,15 @@ static const zend_function_entry wasm_instance_methods[] = {
 static zend_object *wasm_memory_create_object(zend_class_entry *class_type)
 {
     php_wasm_memory_t *intern = ecalloc(1, sizeof(php_wasm_memory_t) + zend_object_properties_size(class_type));
+    fprintf(stderr, "Creating memory object: %p\n", intern);
+    
     zend_object_std_init(&intern->std, class_type);
     object_properties_init(&intern->std, class_type);
+    
+    // Initialize memory fields to zero
+    memset(&intern->memory, 0, sizeof(wasmtime_memory_t));
+    intern->engine_obj = NULL;
+    
     intern->std.handlers = &wasm_memory_object_handlers;
     return &intern->std;
 }
@@ -790,7 +807,18 @@ static zend_object *wasm_memory_create_object(zend_class_entry *class_type)
 static void wasm_memory_free_obj(zend_object *object)
 {
     php_wasm_memory_t *intern = (php_wasm_memory_t *)((char*)(object) - XtOffsetOf(php_wasm_memory_t, std));
+    fprintf(stderr, "Freeing memory object: %p\n", intern);
+    
+    // If we have an engine, decrease its reference count
+    if (intern->engine_obj) {
+        fprintf(stderr, "Releasing engine reference: %p\n", intern->engine_obj);
+        fprintf(stderr, "Engine refcount before release: %d\n", GC_REFCOUNT(&intern->engine_obj->std));
+        GC_DELREF(&intern->engine_obj->std);
+        intern->engine_obj = NULL;
+    }
+    
     zend_object_std_dtor(&intern->std);
+    fprintf(stderr, "Memory object freed completely\n");
 }
 
 /* Arginfo: for all Memory methods */
@@ -841,7 +869,11 @@ PHP_METHOD(WasmMemory, __construct)
 
     php_wasm_engine_t *engine_obj = Z_WASMENGINE_P(engine_zv);
     php_wasm_memory_t *mem_obj    = Z_WASMMEMORY_P(getThis());
-    ZVAL_OBJ_COPY(&mem_obj->engine_zv, engine_zv);
+    
+    // Store a direct reference to the engine and increment its refcount
+    mem_obj->engine_obj = engine_obj;
+    GC_ADDREF(&engine_obj->std);
+    fprintf(stderr, "Memory constructor: engine set, refcount: %d\n", GC_REFCOUNT(&engine_obj->std));
 
     wasmtime_context_t *context = wasmtime_store_context(engine_obj->store);
 
@@ -868,13 +900,19 @@ PHP_METHOD(WasmMemory, __construct)
     }
 
     mem_obj->memory = memory;
+    fprintf(stderr, "Memory constructor completed successfully\n");
 }
 
 PHP_METHOD(WasmMemory, dataSize)
 {
     php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
-    php_wasm_engine_t *engine = Z_WASMENGINE_P(&mem_obj->engine_zv);
-    wasmtime_context_t *context = wasmtime_store_context(engine->store);
+    
+    if (!mem_obj->engine_obj) {
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
     size_t sz = wasmtime_memory_data_size(context, &mem_obj->memory);
     RETURN_LONG(sz);
 }
@@ -887,33 +925,39 @@ PHP_METHOD(WasmMemory, read)
         Z_PARAM_LONG(length)
     ZEND_PARSE_PARAMETERS_END();
 
-	printf("offset: %ld, length: %ld\n", offset, length);
+    fprintf(stderr, "WasmMemory::read - offset: %lld, length: %lld\n", (long long)offset, (long long)length);
 
-	printf("before Z_WASMMEMORY_P\n");
+    fprintf(stderr, "Getting memory object\n");
     php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
-	printf("after Z_WASMMEMORY_P\n");
-	php_wasm_engine_t *engine = Z_WASMENGINE_P(&mem_obj->engine_zv);
-    wasmtime_context_t *context = wasmtime_store_context(engine->store);
+    fprintf(stderr, "Memory object: %p, engine_obj: %p\n", mem_obj, mem_obj->engine_obj);
+    
+    if (!mem_obj->engine_obj) {
+        fprintf(stderr, "ERROR: engine_obj is NULL\n");
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
+    fprintf(stderr, "Context: %p\n", context);
 
-	printf("after wasmtime_store_context\n");
     size_t sz = wasmtime_memory_data_size(context, &mem_obj->memory);
+    fprintf(stderr, "Memory size: %zu\n", sz);
+    
     if (offset < 0 || length < 0 || (size_t)offset + (size_t)length > sz) {
         zend_throw_exception(NULL, "Memory read out of bounds", 0);
         return;
     }
 
-	printf("context: %p\n", context);
     uint8_t *data = wasmtime_memory_data(context, &mem_obj->memory);
-	printf("data: %p\n", data);
-	/**
-	 * Duplicate the string to avoid double free issue – the WASM
-	 * module likely manages its own memory and will free the memory
-	 * when done.
-	 */
-	 char *copy = emalloc(length + 1);
-	memcpy(copy, data + offset, length);
-	copy[length] = '\0';
-	RETURN_STRINGL(copy, length);
+    fprintf(stderr, "Memory data pointer: %p\n", data);
+    
+    // Allocate new memory for the string to avoid double free issues
+    char *copy = emalloc(length + 1);
+    memcpy(copy, data + offset, length);
+    copy[length] = '\0';
+    
+    fprintf(stderr, "Read complete, returning string of length %lld\n", (long long)length);
+    RETURN_STRINGL(copy, length);
 }
 
 PHP_METHOD(WasmMemory, write)
@@ -928,8 +972,13 @@ PHP_METHOD(WasmMemory, write)
     ZEND_PARSE_PARAMETERS_END();
 
     php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
-    php_wasm_engine_t *engine = Z_WASMENGINE_P(&mem_obj->engine_zv);
-    wasmtime_context_t *context = wasmtime_store_context(engine->store);
+    
+    if (!mem_obj->engine_obj) {
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
 
     size_t sz = wasmtime_memory_data_size(context, &mem_obj->memory);
     if (offset < 0 || (size_t)offset + buf_len > sz) {
@@ -944,8 +993,13 @@ PHP_METHOD(WasmMemory, write)
 PHP_METHOD(WasmMemory, size)
 {
     php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
-    php_wasm_engine_t *engine = Z_WASMENGINE_P(&mem_obj->engine_zv);
-    wasmtime_context_t *context = wasmtime_store_context(engine->store);
+    
+    if (!mem_obj->engine_obj) {
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
     size_t pages = wasmtime_memory_size(context, &mem_obj->memory);
     RETURN_LONG((zend_long)pages);
 }
@@ -958,8 +1012,13 @@ PHP_METHOD(WasmMemory, grow)
     ZEND_PARSE_PARAMETERS_END();
 
     php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
-    php_wasm_engine_t *engine = Z_WASMENGINE_P(&mem_obj->engine_zv);
-    wasmtime_context_t *context = wasmtime_store_context(engine->store);
+    
+    if (!mem_obj->engine_obj) {
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
 
     uint64_t previous_size;
     wasmtime_error_t *err = wasmtime_memory_grow(context, &mem_obj->memory, (uint64_t)additional, &previous_size);
