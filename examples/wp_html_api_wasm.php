@@ -229,30 +229,32 @@ class WPHtmlTagProcessor {
         return $this->memory->read($actual_string_ptr, $string_len);
     }
 }
-
-$start_time = microtime(true);
+require_once __DIR__ . "/utils.php";
 
 $html = file_get_contents(__DIR__ . "/html_spec.html");
-
-echo 'Running WASM HTML parser... ';
-$nb_tokens = 0;
-$processor = new WPHtmlTagProcessor($wasm, $html);
-while ($processor->nextToken()) {
-	$nb_tokens++;
-	switch ($processor->getTokenType()) {
-		case '#tag':
-			$tag_name = $processor->getTag();
-			$is_closer = $processor->isTagCloser() ? "closing" : "opening";
-			// echo "Found $is_closer tag: $tag_name\n";
-			break;
-		case '#text':
-			$text = $processor->getModifiableText();
-			// echo "Found text: $text\n";
-			break;
+echo "\n\033[1mBenchmarking WASM implementation...\033[0m\n\n";
+benchmark("Counting tokens", function () use ($html, $wasm) {
+	$nb_tokens = 0;
+	$processor = new WPHtmlTagProcessor($wasm, $html);
+	while ($processor->nextToken()) {
+		$nb_tokens++;
 	}
-}
+	echo "found $nb_tokens tokens";
+});
 
-$end_time = microtime(true);
-$execution_time = ($end_time - $start_time);
-
-echo "Found $nb_tokens tokens in " . number_format($execution_time, 4) . " seconds\n";
+benchmark("Getting token details", function () use ($html, $wasm) {
+	$processor = new WPHtmlTagProcessor($wasm, $html);
+	while ($processor->nextToken()) {
+		switch ($processor->getTokenType()) {
+			case '#tag':
+				$tag_name = $processor->getTag();
+				$is_closer = $processor->isTagCloser() ? "closing" : "opening";
+				// echo "Found $is_closer tag: $tag_name\n";
+				break;
+			case '#text':
+				$text = $processor->getModifiableText();
+				// echo "Found text: $text\n";
+				break;
+		}
+	}
+});

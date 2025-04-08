@@ -9,31 +9,32 @@ require_once __DIR__ . "/html-api/class-wp-html-attribute-token.php";
 require_once __DIR__ . "/html-api/class-wp-html-token.php";
 require_once __DIR__ . "/html-api/class-wp-html-tag-processor.php";
 
-// Example usage
+require_once __DIR__ . "/utils.php";
+
 $html = file_get_contents(__DIR__ . "/html_spec.html");
-$nb_tokens = 0;
-
-$start_time = microtime(true);
-
-echo 'Running PHP HTML parser... ';
-
-$processor = new WP_HTML_Tag_Processor($html);
-while ($processor->next_token()) {
-	$nb_tokens++;
-	switch ($processor->get_token_type()) {
-		case '#tag':
-			$tag_name = $processor->get_tag();
-			$is_closer = $processor->is_tag_closer() ? "closing" : "opening";
-			// echo "Found $is_closer tag: $tag_name\n";
-			break;
-		case '#text':
-			$text = $processor->get_modifiable_text();
-			// echo "Found text: $text\n";
-			break;
+echo "\n\033[1mBenchmarking PHP implementation...\033[0m\n\n";
+benchmark("Counting tokens", function () use ($html) {
+	$nb_tokens = 0;
+	$processor = new WP_HTML_Tag_Processor($html);
+	while ($processor->next_token()) {
+		$nb_tokens++;
 	}
-}
+	echo "found $nb_tokens tokens";
+});
 
-$end_time = microtime(true);
-$execution_time = ($end_time - $start_time);
-
-echo "Found $nb_tokens tokens in " . number_format($execution_time, 4) . " seconds\n";
+benchmark("Getting token details", function () use ($html) {
+	$processor = new WP_HTML_Tag_Processor($html);
+	while ($processor->next_token()) {
+		switch ($processor->get_token_type()) {
+			case '#tag':
+				$tag_name = $processor->get_tag();
+				$is_closer = $processor->is_tag_closer() ? "closing" : "opening";
+				// echo "Found $is_closer tag: $tag_name\n";
+				break;
+			case '#text':
+				$text = $processor->get_modifiable_text();
+				// echo "Found text: $text\n";
+				break;
+		}
+	}
+});
