@@ -856,6 +856,16 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_wasmmemory_grow, 0, 1, MAY_BE_LO
     ZEND_ARG_INFO(0, additional)
 ZEND_END_ARG_INFO()
 
+/* allocate(size): int */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_allocate, 0, 1, IS_LONG, 0)
+    ZEND_ARG_INFO(0, size)
+ZEND_END_ARG_INFO()
+
+/* free(offset): void */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_wasmmemory_free, 0, 1, IS_VOID, 0)
+    ZEND_ARG_INFO(0, offset)
+ZEND_END_ARG_INFO()
+
 PHP_METHOD(WasmMemory, __construct)
 {
     zval *engine_zv;
@@ -916,6 +926,8 @@ PHP_METHOD(WasmMemory, dataSize)
     size_t sz = wasmtime_memory_data_size(context, &mem_obj->memory);
     RETURN_LONG(sz);
 }
+
+
 
 PHP_METHOD(WasmMemory, read)
 {
@@ -1029,6 +1041,81 @@ PHP_METHOD(WasmMemory, grow)
     RETURN_LONG(previous_size);
 }
 
+PHP_METHOD(WasmMemory, allocate)
+{
+    zend_long size;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_LONG(size)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (size <= 0) {
+        zend_throw_exception(NULL, "Allocation size must be positive", 0);
+        return;
+    }
+
+    php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
+    
+    if (!mem_obj->engine_obj) {
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
+    size_t mem_size = wasmtime_memory_data_size(context, &mem_obj->memory);
+    
+    // Simple implementation: just return the current size as the allocation point
+    // In a real implementation, you would track allocations and free blocks
+    // This is a placeholder that always allocates at the end of the current memory
+    
+    // Grow memory if necessary (each page is 64KB)
+    if (mem_size < size) {
+        uint64_t pages_needed = (size - mem_size + 65535) / 65536;
+        uint64_t previous_size;
+        wasmtime_error_t *err = wasmtime_memory_grow(context, &mem_obj->memory, pages_needed, &previous_size);
+        
+        if (err) {
+            wasmtime_error_delete(err);
+            zend_throw_exception(NULL, "Failed to grow memory for allocation", 0);
+            return;
+        }
+        
+        // Memory size after growth
+        mem_size = wasmtime_memory_data_size(context, &mem_obj->memory);
+    }
+    
+    // For now, just return the end of the used memory
+    // A real implementation would need to track allocated blocks
+    // This is just a placeholder that always allocates at the end
+    RETURN_LONG(mem_size - size);
+}
+
+PHP_METHOD(WasmMemory, free)
+{
+    zend_long offset;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_LONG(offset)
+    ZEND_PARSE_PARAMETERS_END();
+
+    php_wasm_memory_t *mem_obj = Z_WASMMEMORY_P(getThis());
+    
+    if (!mem_obj->engine_obj) {
+        zend_throw_exception(NULL, "Memory has invalid engine reference", 0);
+        return;
+    }
+    
+    wasmtime_context_t *context = wasmtime_store_context(mem_obj->engine_obj->store);
+    size_t mem_size = wasmtime_memory_data_size(context, &mem_obj->memory);
+    
+    // Validate offset
+    if (offset < 0 || (size_t)offset >= mem_size) {
+        zend_throw_exception(NULL, "Invalid memory offset for free operation", 0);
+        return;
+    }
+    
+    // This is a placeholder implementation that doesn't actually free memory
+    // In a real implementation, you would mark this block as free for reuse
+    // For now, this method exists but doesn't do anything meaningful
+}
 
 static const zend_function_entry wasm_memory_methods[] = {
     PHP_ME(WasmMemory, __construct, arginfo_wasmmemory_construct, ZEND_ACC_PUBLIC|ZEND_ACC_CTOR)
@@ -1037,6 +1124,8 @@ static const zend_function_entry wasm_memory_methods[] = {
     PHP_ME(WasmMemory, write,       arginfo_wasmmemory_write,      ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, size,        arginfo_wasmmemory_size,       ZEND_ACC_PUBLIC)
     PHP_ME(WasmMemory, grow,        arginfo_wasmmemory_grow,       ZEND_ACC_PUBLIC)
+    PHP_ME(WasmMemory, allocate,    arginfo_wasmmemory_allocate,   ZEND_ACC_PUBLIC)
+    PHP_ME(WasmMemory, free,        arginfo_wasmmemory_free,       ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 
