@@ -65,28 +65,15 @@ echo "Module substring.wasm loaded\n";
 
 $wasm = new WasmInstance($engine, $moduleA, [
 	/**
-	 * @TODO: Why does the Rust module produce these imports?
+	 * @TODO: Why does the Rust module produce these imports? They don't seem to be used.
+	 *        Let's put die() in each to get an alert when they are called.
 	 */
-	'__wbindgen_placeholder__.__wbindgen_describe' => function () {
-		die("__wbindgen_describe\n");
-	},
-	'__wbindgen_placeholder__.__wbindgen_string_new' => function () {
-		die("__wbindgen_string_new\n");
-	},
-	'__wbindgen_placeholder__.__wbindgen_throw' => function () {//int $ptr, int $len) {
-		die("__wbindgen_throw\n");
-	},
-	'__wbindgen_placeholder__.__wbindgen_uint8_array_new' => function () {//int $ptr, int $len) {
-		die("__wbindgen_uint8_array_new\n");
-		// return 0;
-	},
-	'__wbindgen_externref_xform__.__wbindgen_externref_table_grow' => function () {//int $delta) {
-		die("__wbindgen_externref_table_grow\n");
-		// return 0;
-	},
-	'__wbindgen_externref_xform__.__wbindgen_externref_table_set_null' => function () {//int $idx) {
-		die("__wbindgen_externref_table_set_null\n");
-	}
+	'__wbindgen_placeholder__.__wbindgen_describe' => function () { die("__wbindgen_describe\n"); },
+	'__wbindgen_placeholder__.__wbindgen_string_new' => function () { die("__wbindgen_string_new\n"); },
+	'__wbindgen_placeholder__.__wbindgen_throw' => function () { die("__wbindgen_throw\n"); },
+	'__wbindgen_placeholder__.__wbindgen_uint8_array_new' => function () { die("__wbindgen_uint8_array_new\n"); },
+	'__wbindgen_externref_xform__.__wbindgen_externref_table_grow' => function () { die("__wbindgen_externref_table_grow\n"); },
+	'__wbindgen_externref_xform__.__wbindgen_externref_table_set_null' => function () { die("__wbindgen_externref_table_set_null\n"); },
 ]);
 echo "WasmInstance created\n";
 
@@ -100,7 +87,7 @@ echo "Proceeding with memory operations...\n";
 $html = "<p><div>Hello, world!</div></p>";
 $string_pointer = $wasm->call("__wbindgen_malloc", [
 	strlen($html),
-	1 /* alignment. Why? I don't know! Seems non-standard. */
+	4 /* Use alignment 4 */
 ]);
 $memory->write($string_pointer, $html);
 
@@ -112,13 +99,26 @@ $processor_pointer = $wasm->call("wp_html_tag_processor_new", [
 $result = $wasm->call("wp_html_tag_processor_next_token", [$processor_pointer]);
 assert($result === 1, "wp_html_tag_processor_next_token returned 0 – no token found");
 
-$result_pointer = $wasm->call("__wbindgen_malloc", [
-	10,
-	1
-]);
+// Allocate memory for the return pointer (address + length)
+$ret_ptr_loc = $wasm->call("__wbindgen_malloc", [8, 4]); // 8 bytes, align 4 for two i32s
 
-echo "Calling wp_html_processor_get_tag...\n";
-$wasm->call("wp_html_processor_get_tag", [$processor_pointer, $result_pointer]);
-echo "wp_html_processor_get_tag returned\n";
-$tag_name = $memory->read($result_pointer, 1);
+echo "Calling wp_html_tag_processor_get_tag...\n";
+// Pass the pointer to the location where the result pointer and length will be written.
+$wasm->call("wp_html_tag_processor_get_tag", [$ret_ptr_loc, $processor_pointer]);
+echo "wp_html_tag_processor_get_tag returned\n";
+
+// Read the actual string pointer from the return location
+$string_ptr_bytes = $memory->read($ret_ptr_loc, 4);
+$actual_string_ptr = unpack("I", $string_ptr_bytes)[1]; // Unpack as unsigned 32-bit int (adjust if platform differs)
+
+// Read the string length from the return location (immediately after the pointer)
+$string_len_bytes = $memory->read($ret_ptr_loc + 4, 4);
+$string_len = unpack("I", $string_len_bytes)[1]; // Unpack as unsigned 32-bit int
+
+// Read the tag name string from Wasm memory using the pointer and length
+$tag_name = $memory->read($actual_string_ptr, $string_len);
+
 var_dump($tag_name);
+
+// Free the memory allocated for the return pointer
+$wasm->call("__wbindgen_free", [$ret_ptr_loc, 8, 4]);

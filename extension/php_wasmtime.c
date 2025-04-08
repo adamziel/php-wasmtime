@@ -739,6 +739,10 @@ PHP_METHOD(WasmInstance, call)
     }
     wasmtime_func_t func = item.of.func;
 
+    // Determine the number of results expected by the function
+    const wasm_functype_t* func_type = wasmtime_func_type(context, &func);
+    const wasm_valtype_vec_t* result_types = wasm_functype_results(func_type);
+    size_t nresults = result_types->size;
 
     wasmtime_val_t *args = NULL;
     size_t arg_count = 0;
@@ -763,21 +767,27 @@ PHP_METHOD(WasmInstance, call)
         } ZEND_HASH_FOREACH_END();
     }
 
-    // We'll assume one result max for demonstration
-    wasmtime_val_t results[1];
-    memset(results, 0, sizeof(results));
+    // Allocate space for results based on the function signature
+    wasmtime_val_t *results = NULL;
+    if (nresults > 0) {
+        results = ecalloc(nresults, sizeof(wasmtime_val_t));
+    }
     wasm_trap_t *trap = NULL;
 
     wasmtime_error_t *err = wasmtime_func_call(
         context, &func,
         args, arg_count,
-        results, 1,
+        results, nresults, // Pass the correct number of results
         &trap
     );
 
     if (args) efree(args);
 
+    // Clean up function type info
+    wasm_functype_delete((wasm_functype_t*) func_type); // Cast needed as wasmtime_func_type returns const
+
     if (err != NULL) {
+        if (results) efree(results);
         wasm_byte_vec_t msg;
         wasmtime_error_message(err, &msg);
         wasmtime_error_delete(err);
@@ -786,6 +796,7 @@ PHP_METHOD(WasmInstance, call)
         return;
     }
     if (trap != NULL) {
+        if (results) efree(results);
         wasm_byte_vec_t msg;
         wasm_trap_message(trap, &msg);
         wasm_trap_delete(trap);
@@ -794,18 +805,28 @@ PHP_METHOD(WasmInstance, call)
         return;
     }
 
+    // Handle results based on nresults
+    if (nresults == 0) {
+        // No results to free
+        RETURN_NULL();
+    } else {
+        // For now, handle only the first result, similar to before
+        // Future improvement: could return an array for multiple results
+        wasmtime_val_t first_result = results[0];
+        efree(results); // Free the results array
 
-    switch (results[0].kind) {
-        case WASMTIME_I32:
-            RETURN_LONG(results[0].of.i32);
-        case WASMTIME_I64:
-            RETURN_LONG((zend_long)results[0].of.i64);
-        case WASMTIME_F32:
-            RETURN_DOUBLE((double)results[0].of.f32);
-        case WASMTIME_F64:
-            RETURN_DOUBLE(results[0].of.f64);
-        default:
-            RETURN_NULL();
+        switch (first_result.kind) {
+            case WASMTIME_I32:
+                RETURN_LONG(first_result.of.i32);
+            case WASMTIME_I64:
+                RETURN_LONG((zend_long)first_result.of.i64);
+            case WASMTIME_F32:
+                RETURN_DOUBLE((double)first_result.of.f32);
+            case WASMTIME_F64:
+                RETURN_DOUBLE(first_result.of.f64);
+            default:
+                RETURN_NULL(); // Should not happen with known types
+        }
     }
 }
 
