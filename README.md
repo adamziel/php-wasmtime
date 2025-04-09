@@ -1,4 +1,24 @@
-## PHP-WasmTime extension
+## PHP-Wasmtime extension
+
+This PHP extension enables running WebAssembly code (via Wasmtime):
+
+```php
+<?php
+
+$engine = new WasmEngine();
+$module = new WasmModule($engine, __DIR__ . "/hello.wasm");
+$wasm = new WasmInstance($engine, $module);
+
+$result_pointer = $wasm->call("hello", []);        
+$memory = $instanceA->getMemory();
+
+echo $memory->read($result_pointer, 26);
+// Prints "Hello, World!":
+```
+
+This project was built in one day to explore what's possible. It is definitely **not** production-ready.
+
+### Building
 
 First, create a directory called `third_party/wasmtime-v31.0.0-aarch64-macos-c-api` and make sure you have [the relevant wasmtime release](https://github.com/bytecodealliance/wasmtime/releases/tag/v31.0.0) in there.
 
@@ -11,7 +31,7 @@ bash build.sh
 
 To run it, make sure Wasmtime dynamic library is available in the system.
 
-## Benchmarking against vanilla PHP
+### Benchmarking against vanilla PHP
 
 This benchmark parses the HTML spec file (about 1.2MB) and counts the tokens using:
 
