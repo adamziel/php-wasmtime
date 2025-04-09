@@ -24,6 +24,9 @@ First, create a directory called `third_party/wasmtime-v31.0.0-aarch64-macos-c-a
 
 Then, building and installing the extension as follows:
 
+The script assumes there's a third_party/wasmtime-v31.0.0-aarch64-macos-c-api directory with the relevant wasmtime release.
+You can download it from https://github.com/bytecodealliance/wasmtime/releases/tag/v31.0.0.
+
 ```bash
 cd extension
 bash build.sh
