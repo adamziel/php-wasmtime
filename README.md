@@ -1,13 +1,15 @@
 ## PHP-WasmTime extension
 
-Building and installing the extension:
+First, create a directory called `third_party/wasmtime-v31.0.0-aarch64-macos-c-api` and make sure you have [the relevant wasmtime release](https://github.com/bytecodealliance/wasmtime/releases/tag/v31.0.0) in there.
+
+Then, building and installing the extension as follows:
 
 ```bash
 cd extension
 bash build.sh
 ```
 
-Make sure Wasmtime dynamic library is available in the system.
+To run it, make sure Wasmtime dynamic library is available in the system.
 
 ## Benchmarking against vanilla PHP
 
